@@ -9,6 +9,21 @@ It proves knowledge of `x` such that:
 
 without revealing `x`.
 
+## Parameter Roles
+
+The symbols in the math and the code have the following roles:
+
+| Value      | Role                           | Where it lives                  |
+| ---------- | ------------------------------ | ------------------------------- |
+| `g`, `h`   | Generators                     | Modulo `p` (range `[1, p - 1]`) |
+| `y1`, `y2` | Public keys                    | Modulo `p` (range `[1, p - 1]`) |
+| `x`        | Private key / secret exponent  | Modulo `q` (range `[1, q - 1]`) |
+| `k`        | Random nonce / blinding factor | Modulo `q` (range `[1, q - 1]`) |
+| `c`        | Verifier challenge             | Modulo `q` (range `[1, q - 1]`) |
+| `s`        | ZKP response                   | Modulo `q` (range `[1, q - 1]`) |
+
+In this repository, `alpha` and `beta` play the role of the two generators `g` and `h`.
+
 ## What the Scheme Proves
 
 Given public parameters `(alpha, beta, p, q)` and public values `(y1, y2)`, a prover shows:
@@ -83,6 +98,20 @@ Why this works:
 - `beta^s * y2^c = beta^(k - cx) * (beta^x)^c = beta^k = r2`
 
 So if both equations hold, the prover is consistent with one shared secret `x`.
+
+## NUMS Idea for the Second Generator
+
+In a real system, `h` should be generated so nobody knows the discrete-log relationship between `g` and `h`. If the person who sets up the parameters knows `x` such that `h = g^x`, they can break the binding property of Pedersen-style constructions.
+
+One common approach is to use a **Nothing-Up-My-Sleeve (NUMS)** style generation method:
+
+1. Pick a random value `y` in the range `[2, p - 1]`.
+2. Project it into the subgroup of order `q` by computing `h = y^((p - 1) / q) mod p`.
+3. If `h = 1`, discard it and try again.
+
+This gives a valid second generator candidate without intentionally choosing a value with a known secret relation to `g`.
+
+For learning purposes, this README only explains the idea. The code in this repo still uses fixed toy values for the tests.
 
 ## Mapping Math to Code
 

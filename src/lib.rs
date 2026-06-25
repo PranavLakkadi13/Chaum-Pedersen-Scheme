@@ -1,46 +1,58 @@
 use num_bigint::{BigUint, RandBigInt};
-use rand::Rng;
 
-// this is going the the exponentiation operation alpha**x etc
-pub fn exponentiate(n: &BigUint, exponent: &BigUint, modulus: &BigUint) -> BigUint {
-    n.modpow(exponent, modulus)
+pub struct ZKP {
+    // prime field
+    pub p: BigUint,
+    // order of the group
+    pub q: BigUint,
+    // generator 1
+    pub alpha: BigUint,
+    // generator 2
+    pub beta: BigUint,
 }
 
-// output = s = k - c * x mod q
-pub fn solve(k: &BigUint, challenge: &BigUint, secret: &BigUint, modulus: &BigUint) -> BigUint {
-    if *k >= challenge * secret {
-        return (k - challenge * secret).modpow(&BigUint::new(vec![1u32]), modulus);
-    } else {
-        return modulus - (challenge * secret - k).modpow(&BigUint::from(1u32), modulus);
+impl ZKP {
+    // this is going the the exponentiation operation alpha**x etc
+    pub fn exponentiate(n: &BigUint, exponent: &BigUint, modulus: &BigUint) -> BigUint {
+        n.modpow(exponent, modulus)
     }
-}
 
-// check R1 = (alpha ** s * y1 ** c ) mod p
-// check R2 = (beta ** s * y2 ** c) mod p
-pub fn verify(
-    r1: &BigUint,
-    r2: &BigUint,
-    y1: &BigUint,
-    y2: &BigUint,
-    alpha: &BigUint,
-    beta: &BigUint,
-    s: &BigUint,
-    c: &BigUint,
-    modulus: &BigUint,
-) -> bool {
-    let condition1 = *r1
-        == (alpha.modpow(s, modulus) * y1.modpow(c, modulus)).modpow(&BigUint::from(1u32), modulus);
+    // output = s = k - c * x mod q
+    pub fn solve(&self, k: &BigUint, challenge: &BigUint, secret: &BigUint) -> BigUint {
+        if *k >= challenge * secret {
+            return (k - challenge * secret).modpow(&BigUint::new(vec![1u32]), &self.q);
+        } else {
+            return &self.q - (challenge * secret - k).modpow(&BigUint::from(1u32), &self.q);
+        }
+    }
 
-    let condition2 = *r2
-        == (beta.modpow(s, modulus) * y2.modpow(c, modulus)).modpow(&BigUint::from(1u32), modulus);
+    // check R1 = (alpha ** s * y1 ** c ) mod p
+    // check R2 = (beta ** s * y2 ** c) mod p
+    pub fn verify(
+        &self,
+        r1: &BigUint,
+        r2: &BigUint,
+        y1: &BigUint,
+        y2: &BigUint,
+        s: &BigUint,
+        c: &BigUint,
+    ) -> bool {
+        let condition1 = *r1
+            == (&self.alpha.modpow(s, &self.p) * y1.modpow(c, &self.p))
+                .modpow(&BigUint::from(1u32), &self.p);
 
-    // bcoz of the & operation both need to be true
-    condition1 && condition2
-}
+        let condition2 = *r2
+            == (&self.beta.modpow(s, &self.p) * y2.modpow(c, &self.p))
+                .modpow(&BigUint::from(1u32), &self.p);
 
-pub fn generate_random_below(bound: &BigUint) -> BigUint {
-    let mut rng = rand::thread_rng();
-    rng.gen_biguint_below(bound)
+        // bcoz of the & operation both need to be true
+        condition1 && condition2
+    }
+
+    pub fn generate_random_below(bound: &BigUint) -> BigUint {
+        let mut rng = rand::thread_rng();
+        rng.gen_biguint_below(bound)
+    }
 }
 
 #[cfg(test)]
@@ -54,33 +66,40 @@ mod test {
         let p = BigUint::from(23u32);
         let q = BigUint::from(11u32);
 
+        let zkp = ZKP {
+            p: p.clone(),
+            q: q.clone(),
+            alpha: alpha.clone(),
+            beta: beta.clone(),
+        };
+
         let secret = BigUint::from(6u32);
         let k = BigUint::from(7u32);
         let c = BigUint::from(4u32);
 
-        let y1 = super::exponentiate(&alpha, &secret, &p);
+        let y1 = ZKP::exponentiate(&alpha, &secret, &p);
         assert!(y1 == BigUint::from(2u32));
 
-        let y2 = super::exponentiate(&beta, &secret, &p);
+        let y2 = ZKP::exponentiate(&beta, &secret, &p);
         assert!(y2 == BigUint::from(3u32));
 
-        let r1 = super::exponentiate(&alpha, &k, &p);
+        let r1 = ZKP::exponentiate(&alpha, &k, &p);
         assert!(r1 == BigUint::from(8u32));
 
-        let r2 = super::exponentiate(&beta, &k, &p);
+        let r2 = ZKP::exponentiate(&beta, &k, &p);
         assert!(r2 == BigUint::from(4u32));
 
-        let s = super::solve(&k, &c, &secret, &q);
-        assert_eq!(s, BigUint::from(5u32));
+        let s = &zkp.solve(&k, &c, &secret);
+        assert_eq!(*s, BigUint::from(5u32));
 
-        let result = super::verify(&r1, &r2, &y1, &y2, &alpha, &beta, &s, &c, &p);
+        let result = zkp.verify(&r1, &r2, &y1, &y2, &s, &c);
         assert!(result == true);
 
         // trying a fake value
         let secret_fake = BigUint::from(7u32);
-        let s_fake = super::solve(&k, &c, &secret_fake, &q);
+        let s_fake = zkp.solve(&k, &c, &secret_fake);
 
-        let result = super::verify(&r1, &r2, &y1, &y2, &alpha, &beta, &s_fake, &c, &p);
+        let result = zkp.verify(&r1, &r2, &y1, &y2, &s_fake, &c);
         assert!(result == false);
     }
 
@@ -91,21 +110,161 @@ mod test {
         let p = BigUint::from(23u32);
         let q = BigUint::from(11u32);
 
-        let secret = super::generate_random_below(&q);
-        let k = super::generate_random_below(&q);
-        let c = super::generate_random_below(&q);
+        let zkp = ZKP {
+            p: p.clone(),
+            q: q.clone(),
+            alpha: alpha.clone(),
+            beta: beta.clone(),
+        };
 
-        let y1 = super::exponentiate(&alpha, &secret, &p);
+        let secret = ZKP::generate_random_below(&q);
+        let k = ZKP::generate_random_below(&q);
+        let c = ZKP::generate_random_below(&q);
 
-        let y2 = super::exponentiate(&beta, &secret, &p);
+        let y1 = ZKP::exponentiate(&alpha, &secret, &p);
 
-        let r1 = super::exponentiate(&alpha, &k, &p);
+        let y2 = ZKP::exponentiate(&beta, &secret, &p);
 
-        let r2 = super::exponentiate(&beta, &k, &p);
+        let r1 = ZKP::exponentiate(&alpha, &k, &p);
 
-        let s = super::solve(&k, &c, &secret, &q);
+        let r2 = ZKP::exponentiate(&beta, &k, &p);
 
-        let result = super::verify(&r1, &r2, &y1, &y2, &alpha, &beta, &s, &c, &p);
+        let s = zkp.solve(&k, &c, &secret);
+
+        let result = zkp.verify(&r1, &r2, &y1, &y2, &s, &c);
+        assert!(result == true);
+    }
+
+    // https://datatracker.ietf.org/doc/html/rfc5114
+    // refer this
+    // NOW WE WILL TEST FOR 1024 bit prime field
+    //    p = B10B8F96 A080E01D DE92DE5E AE5D54EC 52C99FBC FB06A3C6
+    //        9A6A9DCA 52D23B61 6073E286 75A23D18 9838EF1E 2EE652C0
+    //        13ECB4AE A9061123 24975C3C D49B83BF ACCBDD7D 90C4BD70
+    //        98488E9C 219A7372 4EFFD6FA E5644738 FAA31A4F F55BCCC0
+    //        A151AF5F 0DC8B4BD 45BF37DF 365C1A65 E68CFDA7 6D4DA708
+    //        DF1FB2BC 2E4A4371
+
+    //    The hexadecimal value of the generator is:
+
+    //    g = A4D1CBD5 C3FD3412 6765A442 EFB99905 F8104DD2 58AC507F
+    //        D6406CFF 14266D31 266FEA1E 5C41564B 777E690F 5504F213
+    //        160217B4 B01B886A 5E91547F 9E2749F4 D7FBD7D3 B9A92EE1
+    //        909D0D22 63F80A76 A6A24C08 7A091F53 1DBF0A01 69B6A28A
+    //        D662A4D1 8E73AFA3 2D779D59 18D08BC8 858F4DCE F97C2A24
+    //        855E6EEB 22B3B2E5
+
+    //    The generator generates a prime-order subgroup of size:
+
+    //    q = F518AA87 81A8DF27 8ABA4E7D 64B7CB9D 49462353
+
+    #[test]
+    fn test_toy_example_with_1024_bits() {
+        let p = BigUint::from_bytes_be(&hex::decode("B10B8F96A080E01DDE92DE5EAE5D54EC52C99FBCFB06A3C69A6A9DCA52D23B616073E28675A23D189838EF1E2EE652C013ECB4AEA906112324975C3CD49B83BFACCBDD7D90C4BD7098488E9C219A73724EFFD6FAE5644738FAA31A4FF55BCCC0A151AF5F0DC8B4BD45BF37DF365C1A65E68CFDA76D4DA708DF1FB2BC2E4A4371").expect("Couldnt decode the hex..."));
+
+        let alpha = BigUint::from_bytes_be(&hex::decode("A4D1CBD5C3FD34126765A442EFB99905F8104DD258AC507FD6406CFF14266D31266FEA1E5C41564B777E690F5504F213160217B4B01B886A5E91547F9E2749F4D7FBD7D3B9A92EE1909D0D2263F80A76A6A24C087A091F531DBF0A0169B6A28AD662A4D18E73AFA32D779D5918D08BC8858F4DCEF97C2A24855E6EEB22B3B2E5").expect("Couldnt decode the data of alpha"));
+
+        let q = BigUint::from_bytes_be(
+            &hex::decode("F518AA8781A8DF278ABA4E7D64B7CB9D49462353")
+                .expect("The q value couldnt be decoded"),
+        );
+
+        // since this is a prime field all number in the group will be a generators excluding the identity
+        // so we too a random number for the test but this is not how it should be done generally
+        let beta = alpha.modpow(&ZKP::generate_random_below(&q), &p);
+
+        let zkp = ZKP {
+            p: p.clone(),
+            q: q.clone(),
+            alpha: alpha.clone(),
+            beta: beta.clone(),
+        };
+
+        let secret = ZKP::generate_random_below(&q);
+        let k = ZKP::generate_random_below(&q);
+        let c = ZKP::generate_random_below(&q);
+
+        let y1 = ZKP::exponentiate(&alpha, &secret, &p);
+
+        let y2 = ZKP::exponentiate(&beta, &secret, &p);
+
+        let r1 = ZKP::exponentiate(&alpha, &k, &p);
+
+        let r2 = ZKP::exponentiate(&beta, &k, &p);
+
+        let s = zkp.solve(&k, &c, &secret);
+
+        let result = zkp.verify(&r1, &r2, &y1, &y2, &s, &c);
+        assert!(result == true);
+    }
+
+    //     p =  87A8E61D B4B6663C FFBBD19C 65195999 8CEEF608 660DD0F2
+    //    5D2CEED4 435E3B00 E00DF8F1 D61957D4 FAF7DF45 61B2AA30
+    //    16C3D911 34096FAA 3BF4296D 830E9A7C 209E0C64 97517ABD
+    //    5A8A9D30 6BCF67ED 91F9E672 5B4758C0 22E0B1EF 4275BF7B
+    //    6C5BFC11 D45F9088 B941F54E B1E59BB8 BC39A0BF 12307F5C
+    //    4FDB70C5 81B23F76 B63ACAE1 CAA6B790 2D525267 35488A0E
+    //    F13C6D9A 51BFA4AB 3AD83477 96524D8E F6A167B5 A41825D9
+    //    67E144E5 14056425 1CCACB83 E6B486F6 B3CA3F79 71506026
+    //    C0B857F6 89962856 DED4010A BD0BE621 C3A3960A 54E710C3
+    //    75F26375 D7014103 A4B54330 C198AF12 6116D227 6E11715F
+    //    693877FA D7EF09CA DB094AE9 1E1A1597
+
+    //    The hexadecimal value of the generator is:
+
+    //    g =  3FB32C9B 73134D0B 2E775066 60EDBD48 4CA7B18F 21EF2054
+    //    07F4793A 1A0BA125 10DBC150 77BE463F FF4FED4A AC0BB555
+    //    BE3A6C1B 0C6B47B1 BC3773BF 7E8C6F62 901228F8 C28CBB18
+    //    A55AE313 41000A65 0196F931 C77A57F2 DDF463E5 E9EC144B
+    //    777DE62A AAB8A862 8AC376D2 82D6ED38 64E67982 428EBC83
+    //    1D14348F 6F2F9193 B5045AF2 767164E1 DFC967C1 FB3F2E55
+    //    A4BD1BFF E83B9C80 D052B985 D182EA0A DB2A3B73 13D3FE14
+    //    C8484B1E 052588B9 B7D2BBD2 DF016199 ECD06E15 57CD0915
+    //    B3353BBB 64E0EC37 7FD02837 0DF92B52 C7891428 CDC67EB6
+    //    184B523D 1DB246C3 2F630784 90F00EF8 D647D148 D4795451
+    //    5E2327CF EF98C582 664B4C0F 6CC41659
+
+    //    The generator generates a prime-order subgroup of size:
+
+    //    q =  8CF83642 A709A097 B4479976 40129DA2 99B1A47D 1EB3750B
+    //    A308B0FE 64F5FBD3
+    #[test]
+    fn test_example_2048_bits_prime_and_256_order() {
+        let p = BigUint::from_bytes_be(&hex::decode("87A8E61DB4B6663CFFBBD19C651959998CEEF608660DD0F25D2CEED4435E3B00E00DF8F1D61957D4FAF7DF4561B2AA3016C3D91134096FAA3BF4296D830E9A7C209E0C6497517ABD5A8A9D306BCF67ED91F9E6725B4758C022E0B1EF4275BF7B6C5BFC11D45F9088B941F54EB1E59BB8BC39A0BF12307F5C4FDB70C581B23F76B63ACAE1CAA6B7902D52526735488A0EF13C6D9A51BFA4AB3AD8347796524D8EF6A167B5A41825D967E144E5140564251CCACB83E6B486F6B3CA3F7971506026C0B857F689962856DED4010ABD0BE621C3A3960A54E710C375F26375D7014103A4B54330C198AF126116D2276E11715F693877FAD7EF09CADB094AE91E1A1597").expect("Couldnt decode the hex..."));
+
+        let alpha = BigUint::from_bytes_be(&hex::decode("3FB32C9B73134D0B2E77506660EDBD484CA7B18F21EF205407F4793A1A0BA12510DBC15077BE463FFF4FED4AAC0BB555BE3A6C1B0C6B47B1BC3773BF7E8C6F62901228F8C28CBB18A55AE31341000A650196F931C77A57F2DDF463E5E9EC144B777DE62AAAB8A8628AC376D282D6ED3864E67982428EBC831D14348F6F2F9193B5045AF2767164E1DFC967C1FB3F2E55A4BD1BFFE83B9C80D052B985D182EA0ADB2A3B7313D3FE14C8484B1E052588B9B7D2BBD2DF016199ECD06E1557CD0915B3353BBB64E0EC377FD028370DF92B52C7891428CDC67EB6184B523D1DB246C32F63078490F00EF8D647D148D47954515E2327CFEF98C582664B4C0F6CC41659").expect("Couldnt decode the data of alpha"));
+
+        let q = BigUint::from_bytes_be(
+            &hex::decode("8CF83642A709A097B447997640129DA299B1A47D1EB3750BA308B0FE64F5FBD3")
+                .expect("The q value couldnt be decoded"),
+        );
+
+        // since this is a prime field all number in the group will be a generators excluding the identity
+        // so we too a random number for the test but this is not how it should be done generally
+        let beta = alpha.modpow(&ZKP::generate_random_below(&q), &p);
+
+        let zkp = ZKP {
+            p: p.clone(),
+            q: q.clone(),
+            alpha: alpha.clone(),
+            beta: beta.clone(),
+        };
+
+        let secret = ZKP::generate_random_below(&q);
+        let k = ZKP::generate_random_below(&q);
+        let c = ZKP::generate_random_below(&q);
+
+        let y1 = ZKP::exponentiate(&alpha, &secret, &p);
+
+        let y2 = ZKP::exponentiate(&beta, &secret, &p);
+
+        let r1 = ZKP::exponentiate(&alpha, &k, &p);
+
+        let r2 = ZKP::exponentiate(&beta, &k, &p);
+
+        let s = zkp.solve(&k, &c, &secret);
+
+        let result = zkp.verify(&r1, &r2, &y1, &y2, &s, &c);
         assert!(result == true);
     }
 }
