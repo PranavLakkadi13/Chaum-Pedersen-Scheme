@@ -1,0 +1,8 @@
+[package]
+name = "chaum_pedersen_rust"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+num-bigint = { version = "0.4.6", features = ["rand"] }
+rand = "0.8.5" # since its compatible with num-bigint
