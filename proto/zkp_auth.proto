@@ -1,0 +1,52 @@
+syntax = "proto3";
+package zkp_auth;
+
+// Prover Registers his name and the pub key (y1,y2)
+// y1 = alpha ^ x mod p 
+// y2 = beta ^ x mod p 
+message RegisterRequest {
+    string user = 1;
+    bytes y1 = 2;
+    bytes y2 = 3;
+}
+
+message RegisterResponse {
+
+}
+
+// Here the Prover asks for a challenge by sending r1,r1 (commitment points)
+// r1 = alpha ^ k mod p 
+// r2 = beta ^ k mod p 
+// the response is going to be the challenge "c"
+message AuthenticationChallengeRequest {
+    string user = 1;
+    bytes r1 = 2;
+    bytes r2 = 3;
+}
+
+message AuthenticationChallengeResponse {
+    // added auth id like a token which is now passed with the solved value instead of the username 
+    // this is a bit more secure process the backend will link the auth id to the user
+    string auth_id = 1;
+    bytes c = 2;
+}
+
+
+// the Prover sends back the solved challenge along with the auth id 
+// s = k - c * x mod q 
+// the verifier (server) sends back a session id that allows the authorized user access
+message AuthenticationAnswerRequest {
+    string auth_id = 1;
+    bytes s = 2;
+}
+
+message AuthenticationAnswerResponse {
+    string session_id = 1;
+}
+
+
+service Auth {
+    rpc Register(RegisterRequest) returns (RegisterResponse);
+    rpc CreateAuthenticationChallenge(AuthenticationChallengeRequest) returns (AuthenticationChallengeResponse);
+    rpc VerifyAuthentication(AuthenticationAnswerRequest) returns (AuthenticationAnswerResponse);
+}
