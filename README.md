@@ -1,175 +1,99 @@
-# Chaum-Pedersen Proof (Rust Toy Implementation)
+# Chaum-Pedersen ZKP Authentication (Rust & gRPC)
 
-This project implements a toy version of the **Chaum-Pedersen protocol**: a zero-knowledge proof that two public values share the same hidden exponent.
+This project implements a decentralized, zero-knowledge authentication service in Rust using **gRPC** and the **Chaum-Pedersen protocol**. It demonstrates how a client (Prover) can securely authenticate with a server (Verifier) without ever transmitting or storing their password (or password hashes) on the server.
 
-It proves knowledge of `x` such that:
+The core cryptographic details and mathematical proof of correctness are documented in [Chaum-Pedersen.md](Chaum-Pedersen.md).
 
-- `y1 = alpha^x mod p`
-- `y2 = beta^x mod p`
+---
 
-without revealing `x`.
+## The Zero-Knowledge Authentication Flow
 
-## Parameter Roles
+Traditional authentication requires sending a password to a server (which compares it with a salted hash). If the database is leaked, attackers can perform offline brute-force attacks to crack the hashes.
 
-The symbols in the math and the code have the following roles:
+This project completely eliminates that risk. The password is treated as a secret exponent $x$, and authentication uses a **Zero-Knowledge Proof (ZKP)**:
 
-| Value      | Role                           | Where it lives                  |
-| ---------- | ------------------------------ | ------------------------------- |
-| `g`, `h`   | Generators                     | Modulo `p` (range `[1, p - 1]`) |
-| `y1`, `y2` | Public keys                    | Modulo `p` (range `[1, p - 1]`) |
-| `x`        | Private key / secret exponent  | Modulo `q` (range `[1, q - 1]`) |
-| `k`        | Random nonce / blinding factor | Modulo `q` (range `[1, q - 1]`) |
-| `c`        | Verifier challenge             | Modulo `q` (range `[1, q - 1]`) |
-| `s`        | ZKP response                   | Modulo `q` (range `[1, q - 1]`) |
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client as Client (Prover)
+    actor Server as Server (Verifier)
 
-In this repository, `alpha` and `beta` play the role of the two generators `g` and `h`.
+    Note over Client: Register Phase
+    Client->>Server: RegisterRequest (user, y1, y2)
+    Note over Server: Saves public keys (y1, y2) associated with user
 
-## What the Scheme Proves
+    Note over Client: Authentication Phase
+    Client->>Server: CreateAuthenticationChallenge (user, r1, r2)
+    Note over Server: Saves commitments (r1, r2) and generates random challenge c
+    Server->>Client: AuthenticationChallengeResponse (auth_id, c)
 
-Given public parameters `(alpha, beta, p, q)` and public values `(y1, y2)`, a prover shows:
+    Note over Client: Computes response s = k - c * x mod q
+    Client->>Server: VerifyAuthentication (auth_id, s)
+    Note over Server: Verifies r1 == alpha^s * y1^c and r2 == beta^s * y2^c
+    Server->>Client: AuthenticationAnswerResponse (session_id)
+```
 
-- `log_alpha(y1) = log_beta(y2) = x`
+### Why This Is Secure:
+1. **Password Never Shared:** The password $x$ is never sent over the network or saved anywhere on the server.
+2. **No Password Hashes Stored:** The server only stores the public keys $y_1 = \alpha^x \pmod p$ and $y_2 = \beta^x \pmod p$. Even if the server's database is entirely compromised, an attacker cannot recover $x$ because finding $x$ from $y_1$ or $y_2$ requires solving the **Discrete Logarithm Problem**, which is computationally hard.
+3. **No Replay Attacks:** Every authentication session generates a fresh random nonce $k$ and a fresh verifier challenge $c$. A captured response $s$ from a previous session is completely useless for future authentications.
 
-This is an equality-of-discrete-logs proof.
+---
 
-## What Chaum-Pedersen Is (Intuition)
+## gRPC API Design
 
-Chaum-Pedersen is a **zero-knowledge proof of equality of exponents**.
+The communication uses gRPC for low-latency, strongly typed, and efficient communication. The interface is defined in [proto/zkp_auth.proto](proto/zkp_auth.proto):
 
-- You have two public bases (`alpha`, `beta`).
-- You publish two values (`y1`, `y2`).
-- You want to prove both were made with the same secret exponent `x`.
+```protobuf
+service Auth {
+    // Registers the user's public keys (y1, y2) linked to their username
+    rpc Register(RegisterRequest) returns (RegisterResponse);
+    
+    // Initiates authentication by sending commitments (r1, r2) to receive a challenge (c)
+    rpc CreateAuthenticationChallenge(AuthenticationChallengeRequest) returns (AuthenticationChallengeResponse);
+    
+    // Submits the response (s) to verify the challenge and output a session ID
+    rpc VerifyAuthentication(AuthenticationAnswerRequest) returns (AuthenticationAnswerResponse);
+}
+```
 
-In other words, you prove this statement without leaking `x`:
+---
 
-- `y1 = alpha^x mod p`
-- `y2 = beta^x mod p`
+## Project Structure
 
-Why this is useful:
+- `proto/`
+  - [zkp_auth.proto](proto/zkp_auth.proto): Protobuf definition of the gRPC service and messages.
+- `src/`
+  - [lib.rs](src/lib.rs): Core cryptographic functions (modular exponentiation, proof solving, verification, and random number generation).
+- [build.rs](build.rs): Cargo build script configured to automatically compile the Protobuf file into Rust using `tonic-prost-build`.
+- [Chaum-Pedersen.md](Chaum-Pedersen.md): Cryptographic description, interactive flow breakdown, mathematical definitions, and security definitions.
 
-- It proves consistency of secret data across two equations.
-- It is used inside larger protocols (credentials, signatures, ZK systems).
-- The verifier learns only that the statement is true, not the secret itself.
+---
 
-## Interactive Flow (Prover vs Verifier)
+## How to Run
 
-1. Prover picks random `k` and sends commitments:
+Since everything is managed by Cargo and Tonic, you do not need to install `protobuf` or `protoc` manually on your system.
 
-- `r1 = alpha^k mod p`
-- `r2 = beta^k mod p`
+### 1. Build the Project
+Compile the project and auto-generate the gRPC code:
+```bash
+cargo build
+```
 
-2. Verifier sends random challenge `c`.
-3. Prover answers with response `s`.
-
-- In this repo's variant: `s = k - c*x mod q`
-
-4. Verifier checks both equations:
-
-- `r1 ?= alpha^s * y1^c mod p`
-- `r2 ?= beta^s * y2^c mod p`
-
-If both pass, verifier accepts.
-
-Security intuition:
-
-- Completeness: an honest prover always passes.
-- Soundness: a cheater who does not know `x` cannot answer random `c` reliably.
-- Zero-knowledge (interactive form): verifier gets no usable information to recover `x`.
-
-## Protocol Math (Variant Used in This Code)
-
-This code uses the response form:
-
-- `s = k - c*x mod q`
-
-with commitments:
-
-- `r1 = alpha^k mod p`
-- `r2 = beta^k mod p`
-
-Verifier checks:
-
-- `r1 ?= alpha^s * y1^c mod p`
-- `r2 ?= beta^s * y2^c mod p`
-
-Why this works:
-
-- `alpha^s * y1^c = alpha^(k - cx) * (alpha^x)^c = alpha^k = r1`
-- `beta^s * y2^c = beta^(k - cx) * (beta^x)^c = beta^k = r2`
-
-So if both equations hold, the prover is consistent with one shared secret `x`.
-
-## NUMS Idea for the Second Generator
-
-In a real system, `h` should be generated so nobody knows the discrete-log relationship between `g` and `h`. If the person who sets up the parameters knows `x` such that `h = g^x`, they can break the binding property of Pedersen-style constructions.
-
-One common approach is to use a **Nothing-Up-My-Sleeve (NUMS)** style generation method:
-
-1. Pick a random value `y` in the range `[2, p - 1]`.
-2. Project it into the subgroup of order `q` by computing `h = y^((p - 1) / q) mod p`.
-3. If `h = 1`, discard it and try again.
-
-This gives a valid second generator candidate without intentionally choosing a value with a known secret relation to `g`.
-
-For learning purposes, this README only explains the idea. The code in this repo still uses fixed toy values for the tests.
-
-## Mapping Math to Code
-
-Implementation is in `src/lib.rs`.
-
-- `exponentiate(n, exponent, modulus)`
-  - Computes modular exponentiation `n^exponent mod modulus` using `modpow`.
-
-- `solve(k, challenge, secret, modulus)`
-  - Computes `s = k - c*x mod q`.
-  - Handles underflow for unsigned integers by doing:
-    - direct subtraction when `k >= c*x`
-    - otherwise `q - ((c*x - k) mod q)`
-
-- `verify(...)`
-  - Checks both Chaum-Pedersen equations:
-    - `r1 == (alpha^s * y1^c) mod p`
-    - `r2 == (beta^s * y2^c) mod p`
-  - Returns `true` only if both are true.
-
-- `generate_random_below(bound)`
-  - Samples random `BigUint` values below `bound` (used for toy random tests).
-
-## Toy Example in Tests
-
-The fixed test uses:
-
-- `alpha = 4`, `beta = 9`, `p = 23`, `q = 11`
-- secret `x = 6`, nonce `k = 7`, challenge `c = 4`
-
-Then:
-
-- `y1 = 4^6 mod 23 = 2`
-- `y2 = 9^6 mod 23 = 3`
-- `r1 = 4^7 mod 23 = 8`
-- `r2 = 9^7 mod 23 = 4`
-- `s = 7 - 4*6 mod 11 = 5`
-
-Verifier checks:
-
-- `4^5 * 2^4 mod 23 = 8 = r1`
-- `9^5 * 3^4 mod 23 = 4 = r2`
-
-So verification succeeds.
-
-The test also tries a fake secret (`x = 7`) and verification fails, as expected.
-
-## Running Tests
-
+### 2. Run Tests
+Verify the cryptographic functions:
 ```bash
 cargo test
 ```
 
-## Important Notes
+### 3. Run the Server
+Start the ZKP authentication gRPC server:
+```bash
+cargo run --bin server
+```
 
-This is a learning implementation, not production cryptography.
-
-- Parameters are tiny and insecure.
-- No subgroup membership/cofactor checks are enforced.
-- Random sampling and protocol flow are simplified.
-- For real systems, use audited libraries and standardized groups/curves.
+### 4. Run the Client
+In a separate terminal, run the client to register and authenticate:
+```bash
+cargo run --bin client
+```
