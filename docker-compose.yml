@@ -1,0 +1,15 @@
+version: '3.8'
+
+services: 
+  zkp_server:
+    build: .
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./:/zkp_server
+      - /zkp_server/target
+    environment:
+      - USER=ME
+    container_name: zkpserver
+
+

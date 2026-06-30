@@ -72,28 +72,45 @@ service Auth {
 
 ## How to Run
 
+### Method A: Using Docker (Recommended for Server)
+
+A Docker configuration is provided to run the gRPC server inside a container, exposing the server on port `50051` to the host machine.
+
+1. **Build and start the gRPC Server:**
+   ```bash
+   docker-compose up --build
+   ```
+   This automatically compiles the project in a Linux container and starts the server.
+
+2. **Run the Client (on Host Machine):**
+   In a separate terminal on your host machine, run:
+   ```bash
+   cargo run --bin client
+   ```
+
+---
+
+### Method B: Running Locally
+
 Since everything is managed by Cargo and Tonic, you do not need to install `protobuf` or `protoc` manually on your system.
 
-### 1. Build the Project
-Compile the project and auto-generate the gRPC code:
-```bash
-cargo build
-```
+1. **Build the Project:**
+   ```bash
+   cargo build
+   ```
 
-### 2. Run Tests
-Verify the cryptographic functions:
-```bash
-cargo test
-```
+2. **Run Tests:**
+   ```bash
+   cargo test
+   ```
 
-### 3. Run the Server
-Start the ZKP authentication gRPC server:
-```bash
-cargo run --bin server
-```
+3. **Start the Server:**
+   ```bash
+   cargo run --bin server
+   ```
 
-### 4. Run the Client
-In a separate terminal, run the client to register and authenticate:
-```bash
-cargo run --bin client
-```
+4. **Start the Client:**
+   In a separate terminal:
+   ```bash
+   cargo run --bin client
+   ```
